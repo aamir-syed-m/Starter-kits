@@ -1,2 +1,2 @@
 # Starter-kits
-Ingrams Micro Starter Kits
+Syed Solutions Starter Kits
