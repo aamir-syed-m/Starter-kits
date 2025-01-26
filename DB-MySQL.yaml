@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Distribution Starter-kit for MySQL AWS RDS - Free Tier
+Metadata:
+  License: Apache-2.0
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 'DB Instance Details'
+        Parameters:
+          - DBInstanceType
+      - Label:
+          default: 'DB Instance Networking'
+        Parameters:
+          - myVPC
+          - SubnetA
+          - SubnetB
+          - ConnectionLocation
+      - Label:
+          default: 'DB Configuration'
+        Parameters:
+          - DBName
+          - DBUser
+          - DBPassword
+      - Label:
+          default: 'Starter-kit Specific Details'
+        Parameters:
+          - AWSDistributorName
+          - ReportingEnabled
+
+Parameters:
+  DBInstanceType:
+    Description: Database instance type
+    Type: String
+    AllowedValues: [db.t3.micro]
+    Default: db.t3.micro
+  myVPC:
+    Description: The VPC ID where the instance is going to be deployed
+    Type: AWS::EC2::VPC::Id
+  SubnetA:
+    Description: First Subnet ID where the database can reside
+    Type: AWS::EC2::Subnet::Id
+    ConstraintDescription: must be the ID of an existing subnet
+  SubnetB:
+    Description: Second Subnet ID where the database can reside
+    Type: AWS::EC2::Subnet::Id
+    ConstraintDescription: must be the ID of an existing subnet
+  SecurityGroupDB:
+    Description: Host Firewall for database
+    Type: AWS::EC2::SecurityGroup::Id
+  DBName:
+    Description: The database name
+    Type: String
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters
+    Default: MyDatabase
+  DBUser:
+    Description: The database admin account username
+    Type: String
+    MinLength: 1
+    MaxLength: 16
+    NoEcho: 'true'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters
+  DBPassword:
+    Description: The database admin account password
+    Type: String
+    MinLength: 8
+    MaxLength: 41
+    NoEcho: 'true'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters
+  ####################################################################################
+  AWSDistributorName:
+    Description: Partner Name
+    Type: String
+    Default: AcmeCorp
+  #Disclaimer: Please note that the following data are collected solely for quality assurance purposes - account id, region, distributor name, starter-kit name. Your privacy is important to us, and we do not share your data with third parties.
+  ReportingEnabled:
+    Description: Allow AWS to collect basic usage metrics about this deployment
+    Type: String
+    AllowedValues:
+      - yes
+      - no
+    Default: yes
+
+Conditions:
+  isReportingEnabled: !Equals [!Ref ReportingEnabled, yes]
+
+Resources:
+  MyDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Ref DBName
+      AllocatedStorage: '50'
+      DBInstanceClass: !Ref DBInstanceType
+      Engine: mysql
+      #EngineVersion: 8.0.32
+      MasterUsername: !Ref DBUser
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref SubnetGroup
+      VPCSecurityGroups:
+        - !Ref SecurityGroupDB
+  SubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName:
+        !Join ['-', [!Ref AWS::StackName, database-subnet-group]]
+      DBSubnetGroupDescription: 'Subnet Group'
+      SubnetIds:
+        - !Ref SubnetA
+        - !Ref SubnetB
+  sendStatisticsStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: isReportingEnabled
+    Properties:
+      TemplateURL: !Sub 'https://s3.ap-south-1.amazonaws.com/aws-distribution-bundle-templates/cft_statsProcessor_prod.yaml'
+      Parameters:
+        AWSDistributorName: !Ref AWSDistributorName
+        BundleName: DBM0004
+      TimeoutInMinutes: 5
+
+Outputs:
+  JDBCConnectionString:
+    Description: Endpoint connection string for the database
+    Value: !Join ['', ['jdbc:mysql://', !GetAtt [MyDB, Endpoint.Address], ':', !GetAtt [MyDB, Endpoint.Port], /, !Ref DBName]]

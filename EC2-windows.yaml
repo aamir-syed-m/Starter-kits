@@ -1,0 +1,161 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Distribution Bundle for a Windows Virtual Machine - Free Tier
+Metadata:
+  License: Apache-2.0
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 'Virtual Machine Server Details'
+        Parameters:
+          - ServerName
+          - InstanceType
+          - LatestAmiId
+          - SecurityGroupWeb
+          - KeyName
+      - Label:
+          default: 'Virtual Machine Server Networking'
+        Parameters:
+          - myVPC
+          - SubnetID
+          - RDPLocation
+      - Label:
+          default: 'Bundle Specific Details'
+        Parameters:
+          - AWSDistributorName
+          - ReportingEnabled
+
+Parameters:
+  ServerName:
+    Description: Please provide a server name
+    Type: String
+  InstanceType:
+    Description: WebServer EC2 instance type (for SMALL server use t3.medium, for a MEDIUM server use m5.large, for a LARGE server use m5.xlarge)
+    Type: String
+    AllowedValues: [t2.micro]
+    ConstraintDescription: must be a valid EC2 instance type
+    Default: t2.micro
+  LatestAmiId:
+    Description: The latest Windows OS
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    AllowedValues:
+      [
+        /aws/service/ami-windows-latest/Windows_Server-2019-English-Full-Base,
+        /aws/service/ami-windows-latest/Windows_Server-2016-English-Full-Base,
+        /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base,
+      ]
+    Default: '/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base'
+  SecurityGroupWeb:
+    Description: Host Firewall for webserver
+    Type: AWS::EC2::SecurityGroup::Id
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair
+  myVPC:
+    Description: The VPC ID where the instance is going to be deployed
+    Type: AWS::EC2::VPC::Id
+  SubnetID:
+    Description: The SubnetID where this instance is going to be deployed
+    Type: AWS::EC2::Subnet::Id
+    ConstraintDescription: must be the ID of an existing subnet
+  RDPLocation:
+    Description: The IP address range that can be used to RDP to the Virtual Machine
+    Type: String
+    MinLength: 9
+    MaxLength: 18
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x
+    Default: 0.0.0.0/0
+  ####################################################################################
+  AWSDistributorName:
+    Description: Partner Name
+    Type: String
+    Default: AcmeCorp
+  #Disclaimer: Please note that the following data are collected solely for quality assurance purposes - account id, region, distributor name, bundle name. Your privacy is important to us, and we do not share your data with third parties.
+  ReportingEnabled:
+    Description: Allow AWS to collect basic usage metrics about this deployment
+    Type: String
+    AllowedValues:
+      - yes
+      - no
+    Default: yes
+
+Conditions:
+  isReportingEnabled: !Equals [!Ref ReportingEnabled, yes]
+
+Resources:
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: !Ref LatestAmiId
+      NetworkInterfaces:
+        - Description: Primary network interface
+          DeviceIndex: '0'
+          SubnetId: !Ref SubnetID
+          AssociatePublicIpAddress: true
+          GroupSet:
+            - Ref: InstanceSecurityGroup
+            - Ref: SecurityGroupWeb
+      Tags:
+        - Key: Name
+          Value: !Ref ServerName
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref myVPC
+      GroupName: Web Server RDP Access
+      GroupDescription: Enable RDP access via port 3389
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: !Ref RDPLocation
+  NewVolume:
+    Type: AWS::EC2::Volume
+    DependsOn: EC2Instance
+    Properties:
+      Size: 50
+      VolumeType: gp3
+      AvailabilityZone: !GetAtt EC2Instance.AvailabilityZone
+      Tags:
+        - Key: Name
+          Value: BundleVolume
+    DeletionPolicy: Snapshot
+  MountPoint:
+    Type: AWS::EC2::VolumeAttachment
+    DependsOn: NewVolume
+    Properties:
+      InstanceId: !Ref EC2Instance
+      VolumeId: !Ref NewVolume
+      Device: /dev/sdh
+  sendStatisticsStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: isReportingEnabled
+    Properties:
+      TemplateURL: !Sub 'https://s3.ap-south-1.amazonaws.com/aws-distribution-bundle-templates/cft_statsProcessor_prod.yaml'
+      Parameters:
+        AWSDistributorName: !Ref AWSDistributorName
+        BundleName: INF0013
+      TimeoutInMinutes: 5
+
+Outputs:
+  InstanceId:
+    Description: InstanceId of the newly created EC2 instance
+    Value: !Ref EC2Instance
+  AZ:
+    Description: Availability Zone of the newly created EC2 instance
+    Value: !GetAtt [EC2Instance, AvailabilityZone]
+  PublicDNS:
+    Description: Public DNSName of the newly created EC2 instance
+    Value: !GetAtt [EC2Instance, PublicDnsName]
+  PublicIP:
+    Description: Public IP address of the newly created EC2 instance
+    Value: !GetAtt [EC2Instance, PublicIp]
+  PrivateDNS:
+    Description: Private DNSName of the newly created EC2 instance
+    Value: !GetAtt [EC2Instance, PrivateDnsName]
+  PrivateIP:
+    Description: Private IP address of the newly created EC2 instance
+    Value: !GetAtt [EC2Instance, PrivateIp]
